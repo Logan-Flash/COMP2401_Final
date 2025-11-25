@@ -13,6 +13,7 @@
 
 #define MAX_ROOM_NAME 64
 #define MAX_HUNTER_NAME 64
+#define MAX_HUNTERS 10
 #define MAX_ROOMS 24
 #define MAX_ROOM_OCCUPANCY 8
 #define MAX_CONNECTIONS 8
@@ -21,6 +22,15 @@
 #define DEFAULT_GHOST_ID 68057
 
 typedef unsigned char EvidenceByte; // Just giving a helpful name to unsigned char for evidence bitmasks
+typedef struct Ghost Ghost;
+typedef struct GhostNode GhostNode;
+typedef struct GhostList GhostList;
+typedef struct Room Room;
+typedef struct RoomArray RoomArray;
+typedef struct House House;
+typedef struct Hunter Hunter;
+typedef struct RoomNode RoomNode;
+typedef struct RoomStack RoomStack;
 
 enum LogReason {
     LR_EVIDENCE = 0,
@@ -70,19 +80,72 @@ struct CaseFile {
     bool         solved;    // True when >=3 unique bits set
     sem_t        mutex;     // Used for synchronizing both fields when multithreading
 };
-
+struct RoomArray {
+	Room* data [MAX_ROOMS];
+	int count;
+};
 // Implement here based on the requirements, should all be allocated to the House structure
 struct Room {
+	char name [MAX_ROOM_NAME];
+	struct RoomArray connections;
+	Ghost *ghost;
+	Hunter* hunters[MAX_HUNTERS];
+	int num_of_hunters;
+	bool exit; 
+	EvidenceByte evidence;
+};
+struct RoomNode {
+	Room* room;
+	struct Room* next_room;
+};
+
+struct RoomStack {
+	RoomNode* front;
+	int size;
+	int top;
 };
 
 // Implement here based on the requirements, should be allocated to the House structure
 struct Ghost {
-
+	int id;
+	enum GhostType type;
+	struct Room *room;
+	int boredom;
+	bool exited;
 };
+struct GhostNode {
+	Ghost* ghost;
+	GhostNode* nextGhost;
+	GhostNode* previousGhost;
+};
+
+struct GhostList {
+	GhostNode* headGhost;
+	GhostNode* tailGhost;
+};
+
+struct Hunter {
+	char name [MAX_HUNTER_NAME];
+	Room* curr_room;
+	struct CaseFile* casefile;
+	enum EvidenceType curr_device;
+	struct RoomStack path; 
+	int fear;
+	int boredom;
+	enum LogReason reason;
+	bool exited;
+	
+};
+
 
 // Can be either stack or heap allocated
 struct House {
     struct Room* starting_room; // Needed by house_populate_rooms, but can be adjusted to suit your needs.
+	struct RoomArray rooms [MAX_ROOMS];
+	struct Hunter *hunters;
+	int hunter_capacity;
+	struct CaseFile casefile;
+	struct GhostList ghosts;
 };
 
 /* The provided `house_populate_rooms()` function requires the following functions.
@@ -92,5 +155,39 @@ struct House {
 
 void room_init(struct Room* room, const char* name, bool is_exit);
 void rooms_connect(struct Room* a, struct Room* b); // Bidirectional connection
+void room_create(Room** room, int id, const char* name);
+void room_add_hunter(Room* room, Hunter* h);
+void room_add_ghost(Room* room, Ghost* ghost);
+void room_print(Room* room);
+void room_cleanup(Room* room); 
+void room_remove_hunter(Room* room, Hunter* h);
+bool room_has_ghost(Room* room);
+
+void roomarray_init(RoomArray* arr);
+void roomarray_add(RoomArray* arr, Room* room);
+void roomarray_print(RoomArray* arr);
+void roomarray_cleanup(RoomArray* arr);
+
+void roomstack_init(RoomStack* stack);
+Room* roomstack_push(RoomStack* stack, Room* room);
+Room* roomstack_peek(RoomStack* stack);
+void roomstack_cleanup(RoomStack* stack);
+
+void ghost_create(Ghost* ghost);
+void ghost_print(Ghost* ghost);
+void ghost_cleanup(Ghost* ghost);
+
+void ghostlist_init(GhostList* list);
+void ghostlist_push(GhostList* list, GhostNode node);
+void ghostlist_print(GhostList* list);
+void ghostlist_cleanup(GhostList* list);
+
+void ghostnode_cleanup(GhostNode* node);
+
+void hunter_create(Hunter* hunter);
+void hunter_print(Hunter* hunter);
+void hunter_cleanup(Hunter* hunter);
+
+
 
 #endif // DEFS_H
