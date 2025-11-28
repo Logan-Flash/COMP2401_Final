@@ -18,6 +18,8 @@ int main() {
          - The evidence collected by each hunter and which ghost is represented by that evidence.
     7. Clean up all dynamically allocated resources and call sem_destroy() on all semaphores.
     */
-
+	struct House house;
+	house_init(&house);
+	house_populate_rooms(&house);
     return 0;
 }
