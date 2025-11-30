@@ -25,89 +25,80 @@ int main() {
 	house_populate_rooms(&house);
 	printf("--- Initializing Hunters ---\n");
     house_init_hunters(&house);
-    printf("--- Initializing Ghosts ---\n");
+    printf("--- Initializing Ghost ---\n");
     ghost_init(&house.ghost, &house);
+    printf("Ghost Type: %s", ghost_to_string(house.ghost.type));
+    
     printf("\n--- Starting Simulation ---\n");
     
     bool ghost_running = true;
     bool hunters_remaining = true;
 
     while (ghost_running && hunters_remaining) {
-        // A. Ghost Turn
         ghost_running = ghost_take_turn(&house.ghost);
 
-        // B. Hunter Turns
-        int active_hunters = 0;
+        int active = 0;
         for (int i = 0; i < house.hunter_capacity; i++) {
             if (hunter_take_turn(&house.hunters[i])) {
-                active_hunters++;
+                active++;
             }
         }
-
-        // C. Check Termination
-        if (active_hunters == 0) {
-            hunters_remaining = false;
-        }
-
+        if (active == 0) hunters_remaining = false;
     }
 
-    /* 6. Print Final Results */
-    printf("\n=========================================\n");
-    printf("       FINAL RESULTS       \n");
-    printf("=========================================\n");
-
-    // Ghost Result
+    printf("\n--- FINAL RESULTS ---\n");
     printf("Ghost: %s\n", ghost_to_string(house.ghost.type));
     
-    // Check room using standard if/else logic instead of ternary operator
-    char* ghost_room_name;
-    if (house.ghost.room != NULL) {
-        ghost_room_name = house.ghost.room->name;
-    } else {
-        ghost_room_name = "Exited";
-    }
-    printf("       Ended in room: %s\n", ghost_room_name);
-
-    // Hunter Results
-    printf("\n--- Hunters ---\n");
     for (int i = 0; i < house.hunter_capacity; i++) {
         Hunter* h = &house.hunters[i];
-        printf("Hunter %s [%s]: ", h->name, exit_reason_to_string(h->reason));
-        
-        if (h->reason == LR_EVIDENCE) {
-            printf("SUCCESS! Found enough evidence.\n");
-        } else if (h->reason == LR_AFRAID) {
-            printf("RAN AWAY in fear!\n");
-        } else {
-            printf("Left due to boredom.\n");
-        }
+        printf("Hunter %s: %s\n", h->name, exit_reason_to_string(h->reason));
     }
 
-    // Evidence Results
-    printf("\n--- Evidence Collected ---\n");
+    // Evidence
     EvidenceByte collected = house.casefile.collected;
-    printf("Evidence Found: ");
     
+    // --- DEBUG PRINT: Show exactly what evidence was found ---
+    printf("\nCollected Evidence Byte: %02X (Hex)\n", collected); // Print raw hex
+    printf("Evidence Items: ");
+    
+    // Get all possible evidence types from helper
     const enum EvidenceType* ev_list;
     int ev_count = get_all_evidence_types(&ev_list);
     int found_count = 0;
-    
-    for(int i=0; i<ev_count; i++) {
+
+    for (int i = 0; i < ev_count; i++) {
+        // Check if the specific bit is set
         if (collected & ev_list[i]) {
             printf("[%s] ", evidence_to_string(ev_list[i]));
             found_count++;
         }
     }
-    if (found_count == 0) printf("None");
-    printf("\n");
-
-    // Determine Winner
-    // (You can implement the complex ghost matching logic here later)
-    if (found_count >= 3) {
-        printf("RESULT: Hunters Won! (3 evidence found)\n");
-    } else {
-        printf("RESULT: Ghost Won! (Not enough evidence)\n");
+    if (found_count == 0) {
+        printf("None");
     }
- 
+    printf("\n");
+    // ---------------------------------------------------------
+
+    const enum GhostType* all_ghosts;
+    int num_ghosts = get_all_ghost_types(&all_ghosts);
+    bool hunters_won = false;
+
+    for (int i = 0; i < num_ghosts; i++) {
+        if (collected == all_ghosts[i]) {
+            printf("Evidence matches: %s\n", ghost_to_string(all_ghosts[i]));
+            if (all_ghosts[i] == house.ghost.type){
+            	hunters_won = true;
+            }
+            break;
+        }
+    }
+
+    // 3. Final Conclusion
+    if (hunters_won) {
+        printf("RESULT: Hunters Won! Correctly identified the ghost.\n");
+    } else {
+        printf("RESULT: Ghost Won! Hunters failed to find the correct 3 pieces of evidence.\n");
+    }
+ 	house_cleanup(&house);
     return 0;
 }

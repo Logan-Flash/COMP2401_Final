@@ -116,7 +116,7 @@ bool ghost_take_turn(Ghost* ghost) {
         return false;
     }
 
-    int action = rand()/3; // 0 = Idle, 1 = Haunt, 2 = Move
+    int action = rand() % 3; // 0 = Idle, 1 = Haunt, 2 = Move
     
     if (action == 0) {
         log_ghost_idle(ghost->id, ghost->boredom, ghost->room->name);

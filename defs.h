@@ -5,33 +5,29 @@
 #include <semaphore.h>
 #include <pthread.h>
 
-/*
-    You are free to rename all of the types and functions defined here.
-
-    The ghost ID must remain the same for the validator to work correctly.
-*/
-
 #define MAX_ROOM_NAME 64
 #define MAX_HUNTER_NAME 64
-#define MAX_HUNTERS 10
-#define MAX_ROOMS 24
-#define MAX_ROOM_OCCUPANCY 8
-#define MAX_CONNECTIONS 8
-#define ENTITY_BOREDOM_MAX 15
-#define HUNTER_FEAR_MAX 15
+#define MAX_HUNTERS 4
+#define MAX_ROOMS 13
+#define MAX_CONNECTIONS 13
+#define ENTITY_BOREDOM_MAX 100
+#define HUNTER_FEAR_MAX 100
 #define DEFAULT_GHOST_ID 68057
+#define STARTING_ROOM_NAME "Van"
 
-typedef unsigned char EvidenceByte; // Just giving a helpful name to unsigned char for evidence bitmasks
+// --- Typedefs ---
+typedef unsigned char EvidenceByte;
+// Typedefs for structs
 typedef struct Ghost Ghost;
-typedef struct GhostNode GhostNode;
-typedef struct GhostList GhostList;
 typedef struct Room Room;
 typedef struct RoomArray RoomArray;
 typedef struct House House;
 typedef struct Hunter Hunter;
 typedef struct RoomNode RoomNode;
 typedef struct RoomStack RoomStack;
+typedef struct CaseFile CaseFile;
 
+// --- Enums ---
 enum LogReason {
     LR_EVIDENCE = 0,
     LR_BORED = 1,
@@ -75,119 +71,106 @@ enum GhostType {
     GH_SPIRIT       = EV_WRITING      | EV_RADIO       | EV_EMF,
 };
 
+// --- Structures ---
 struct CaseFile {
-    EvidenceByte collected; // Union of all of the evidence bits collected between all hunters
-    bool         solved;    // True when >=3 unique bits set
-    sem_t        mutex;     // Used for synchronizing both fields when multithreading
+    EvidenceByte collected;
+    bool solved;
+    sem_t mutex;
 };
+
 struct RoomArray {
-	Room* data [MAX_ROOMS];
-	int count;
+    Room* data[MAX_CONNECTIONS];
+    int count;
 };
-// Implement here based on the requirements, should all be allocated to the House structure
+
+struct Ghost {
+    int id;
+    enum GhostType type;
+    struct Room* room;
+    int boredom;
+    bool exited;
+};
+
 struct Room {
-	char name [MAX_ROOM_NAME];
-	struct RoomArray connections;
-	Ghost *ghost;
-	Hunter* hunters[MAX_HUNTERS];
-	int num_of_hunters;
-	bool exit; 
-	EvidenceByte evidence;
+    char name[MAX_ROOM_NAME];
+    struct RoomArray connections;
+    Ghost* ghost;
+    Hunter* hunters[MAX_HUNTERS];
+    int num_of_hunters;
+    bool exit; 
+    EvidenceByte evidence;
+    sem_t mutex;
 };
+
+// Linked List Stack
 struct RoomNode {
-	Room* room;
-	struct Room* next_room;
+    Room* room;
+    struct RoomNode* next;
 };
 
 struct RoomStack {
-	RoomNode* front;
-	int size;
-	int top;
-};
-
-// Implement here based on the requirements, should be allocated to the House structure
-struct Ghost {
-	int id;
-	enum GhostType type;
-	struct Room *room;
-	int boredom;
-	bool exited;
-};
-struct GhostNode {
-	Ghost* ghost;
-	GhostNode* nextGhost;
-	GhostNode* previousGhost;
-};
-
-struct GhostList {
-	GhostNode* headGhost;
-	GhostNode* tailGhost;
+    RoomNode* front;
+    int size;
 };
 
 struct Hunter {
-	char name [MAX_HUNTER_NAME];
-	Room* curr_room;
-	struct CaseFile* casefile;
-	enum EvidenceType curr_device;
-	struct RoomStack path; 
-	int fear;
-	int boredom;
-	enum LogReason reason;
-	bool exited;
-	
+    int id;
+    char name[MAX_HUNTER_NAME];
+    Room* curr_room;
+    struct CaseFile* casefile;
+    enum EvidenceType curr_device;
+    struct RoomStack path; // NOT a pointer
+    int fear;
+    int boredom;
+    enum LogReason reason;
+    bool exited;
+    bool returning;
 };
 
-
-// Can be either stack or heap allocated
 struct House {
-    struct Room* starting_room; // Needed by house_populate_rooms, but can be adjusted to suit your needs.
-	struct RoomArray rooms [MAX_ROOMS];
-	struct Hunter *hunters;
-	int hunter_capacity;
-	struct CaseFile casefile;
-	struct GhostList ghosts;
+    struct Room* starting_room;
+    struct Room rooms[MAX_ROOMS];
+    int room_count;
+    struct Hunter* hunters;
+    int hunter_capacity;
+    struct CaseFile casefile;
+    struct Ghost ghost; 
 };
 
-/* The provided `house_populate_rooms()` function requires the following functions.
-   You are free to rename them and change their parameters and modify house_populate_rooms()
-   as needed as long as the house has the correct rooms and connections after calling it.
-*/
+// --- Prototypes ---
 
-void room_init(struct Room* room, const char* name, bool is_exit);
-void rooms_connect(struct Room* a, struct Room* b); // Bidirectional connection
-void room_create(Room** room, int id, const char* name);
+// House
+void house_init(House* house);
+void house_init_hunters(House* house);
+void house_populate_rooms(House* house);
+void house_cleanup(House* house);
+
+// Room
+void room_init(Room* room, const char* name, bool is_exit);
+void room_connect(Room* a, Room* b);
 void room_add_hunter(Room* room, Hunter* h);
-void room_add_ghost(Room* room, Ghost* ghost);
-void room_print(Room* room);
-void room_cleanup(Room* room); 
 void room_remove_hunter(Room* room, Hunter* h);
-bool room_has_ghost(Room* room);
-
-void roomarray_init(RoomArray* arr);
+void room_add_ghost(Room* room, Ghost* ghost);
+void room_remove_ghost(Room* room, Ghost* ghost);
+void room_cleanup(Room* room);
 void roomarray_add(RoomArray* arr, Room* room);
-void roomarray_print(RoomArray* arr);
-void roomarray_cleanup(RoomArray* arr);
 
+// Room Stack (Updated to match what you actually need)
 void roomstack_init(RoomStack* stack);
-Room* roomstack_push(RoomStack* stack, Room* room);
-Room* roomstack_peek(RoomStack* stack);
+void roomstack_push(RoomStack* stack, Room* room);
+Room* roomstack_pop(RoomStack* stack);
 void roomstack_cleanup(RoomStack* stack);
 
-void ghost_create(Ghost* ghost);
-void ghost_print(Ghost* ghost);
-void ghost_cleanup(Ghost* ghost);
+// Ghost
+void ghost_init(Ghost* ghost, House* house);
+bool ghost_take_turn(Ghost* ghost);
+void* ghost_thread(void* arg);
 
-void ghostlist_init(GhostList* list);
-void ghostlist_push(GhostList* list, GhostNode node);
-void ghostlist_print(GhostList* list);
-void ghostlist_cleanup(GhostList* list);
-
-void ghostnode_cleanup(GhostNode* node);
-
-void hunter_create(Hunter* hunter);
-void hunter_print(Hunter* hunter);
+// Hunter
+void hunter_init(Hunter* hunter, int id, char* name, House* house);
+bool hunter_take_turn(Hunter* hunter);
 void hunter_cleanup(Hunter* hunter);
+void* hunter_thread(void* arg);
+void hunter_print(Hunter* hunter);
 
-
-
-#endif // DEFS_H
+#endif

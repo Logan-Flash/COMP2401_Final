@@ -3,141 +3,190 @@
 #include <string.h>
 #include "defs.h"
 #include "helpers.h"
-void roomstack_init(RoomStack* stack){
-	stack->front = NULL;
-	stack->size = 0;
-}
-void roomstack_cleanup(RoomStack* stack){
-	(void)stack;
-}
-enum EvidenceType random_device(){
-	enum EvidenceType devices[] = {
-		EV_EMF, EV_ORBS, EV_RADIO, EV_TEMPERATURE, EV_FINGERPRINTS, EV_WRITING, EV_INFRARED 
-	};
-	int num_of_devices = sizeof(devices)/sizeof(devices[0]);
-	return devices[rand()%num_of_devices];
-}
-void hunter_init(Hunter* hunter, int id, char* name, House* house){
-	strncpy(hunter->name, name, MAX_HUNTER_NAME - 1);
-	hunter->name[MAX_HUNTER_NAME - 1] = '\0';
-	
-	hunter->curr_room = house->starting_room;
-	hunter->curr_device = random_device();
-	hunter->casefile = &house->casefile;
-	roomstack_init(&hunter->path);
-	hunter->fear = 0;
-	hunter->boredom = 0;
-	hunter->exited = false;
-	hunter->id = id;
-	log_hunter_init(hunter->id, hunter->curr_room->name, hunter->name, hunter->curr_device); 
-}
-void hunter_print(Hunter* hunter){
-    if (hunter == NULL) return;
-    const char* device_name = evidence_to_string(hunter->curr_device);
 
-    printf("Hunter: %-15s | Room: %-15s | Device: %s\n", 
-           hunter->name, hunter->curr_room->name, device_name);
+/* Stack Functions */
+void roomstack_init(RoomStack* stack) {
+    if (stack == NULL) return;
+    stack->front = NULL;
+    stack->size = 0;
 }
+
+void roomstack_push(RoomStack* stack, Room* room) {
+    if (stack == NULL || room == NULL) return;
+    RoomNode* new_node = malloc(sizeof(RoomNode));
+    if (new_node == NULL) return;
+    new_node->room = room;
+    new_node->next = stack->front;
+    stack->front = new_node;
+    stack->size++;
+}
+
+Room* roomstack_pop(RoomStack* stack) {
+    if (stack == NULL || stack->front == NULL) return NULL;
+    RoomNode* temp = stack->front;
+    Room* room = temp->room;
+    stack->front = temp->next;
+    free(temp);
+    stack->size--;
+    return room;
+}
+
+void roomstack_cleanup(RoomStack* stack) {
+    if (stack == NULL) return;
+    while (stack->front != NULL) {
+        roomstack_pop(stack);
+    }
+}
+
+/* Hunter Functions */
 int count_evidence(EvidenceByte collected) {
     int count = 0;
     for (int i = 0; i < 8; i++) {
-        if ((collected >> i) & 1) {
-            count++;
-        }
+        if ((collected >> i) & 1) count++;
     }
     return count;
 }
-void hunter_collect(Hunter* hunter) {
-	if (hunter->curr_room == NULL) {
-        printf("[ERROR] Hunter %s is in a NULL room!\n", hunter->name);
-        return;
-    }
-    if (hunter->casefile == NULL) {
-        printf("[ERROR] Hunter %s has no CaseFile!\n", hunter->name);
-        return;
-    }
-    Room* r = hunter->curr_room;
-    
-    // Check if the room has the evidence detectable by this hunter's device
-    if (r->evidence & hunter->curr_device) {
-        // Evidence found!
-        log_evidence(0, hunter->boredom, hunter->fear, r->name, hunter->curr_device);
-        
-        // Add to shared casefile
-        hunter->casefile->collected |= hunter->curr_device;
-        
-        // Remove from room (so others don't find the same bit indefinitely)
-        r->evidence &= ~hunter->curr_device;
-        
-        // Reset boredom on success
-        hunter->boredom = 0;
-        if (count_evidence(hunter->casefile->collected) >= 3) { // Hunter leaves if collected enough evidence
-            log_exit(0, hunter->boredom, hunter->fear, r->name, hunter->curr_device, LR_EVIDENCE);
-            hunter->reason = LR_EVIDENCE;
-            hunter->exited = true;
-            room_remove_hunter(r, hunter);
-        }
-    }
-    
+
+enum EvidenceType random_device(){
+    enum EvidenceType devices[] = {
+        EV_EMF, EV_ORBS, EV_RADIO, EV_TEMPERATURE, EV_FINGERPRINTS, EV_WRITING, EV_INFRARED 
+    };
+    int num = sizeof(devices)/sizeof(devices[0]);
+    return devices[rand() % num];
 }
 
+void hunter_init(Hunter* hunter, int id, char* name, House* house){
+    if (hunter == NULL) return;
+    hunter->id = id;
+    strncpy(hunter->name, name, MAX_HUNTER_NAME - 1);
+    hunter->name[MAX_HUNTER_NAME - 1] = '\0';
+    
+    hunter->curr_room = house->starting_room;
+    hunter->casefile = &house->casefile;
+    hunter->curr_device = random_device();
+    
+    // Init stack (Pass address)
+    roomstack_init(&hunter->path);
+    
+    hunter->fear = 0;
+    hunter->boredom = 0;
+    hunter->exited = false;
+    hunter->returning = false;
+    
+    if (hunter->curr_room) {
+        log_hunter_init(id, hunter->curr_room->name, hunter->name, hunter->curr_device);
+    }
+}
+
+void hunter_collect(Hunter* hunter) {
+    if (hunter == NULL || hunter->curr_room == NULL) return;
+    Room* r = hunter->curr_room;
+    
+    if (r->evidence & hunter->curr_device) {
+        log_evidence(hunter->id, hunter->boredom, hunter->fear, r->name, hunter->curr_device);
+        hunter->casefile->collected |= hunter->curr_device;
+        r->evidence &= ~hunter->curr_device;
+        hunter->boredom = 0;
+        
+        if (strcmp(r->name, STARTING_ROOM_NAME) != 0) {
+            hunter->returning = true;
+            log_return_to_van(hunter->id, hunter->boredom, hunter->fear, r->name, hunter->curr_device, true);
+        }
+    } else {
+        // Random return chance
+        if (rand() % 100 < 10) {
+             if (strcmp(r->name, STARTING_ROOM_NAME) != 0 && !hunter->returning) {
+                hunter->returning = true;
+                log_return_to_van(hunter->id, hunter->boredom, hunter->fear, r->name, hunter->curr_device, true);
+            }
+        }
+    }
+}
 
 void hunter_move(Hunter* hunter) {
-	if (hunter == NULL || hunter->curr_room == NULL) return;
-    Room* curr = hunter->curr_room;
+    if (hunter == NULL || hunter->curr_room == NULL) return;
     
-    if (curr->connections.count > 0) {
-        int r = rand_int_threadsafe(0, curr->connections.count);
-        Room* next = curr->connections.data[r];
-        
-        // Move Logic
+    Room* curr = hunter->curr_room;
+    Room* next = NULL;
+
+    if (hunter->returning) {
+        // Return logic
+        next = roomstack_pop(&hunter->path);
+        if (next == NULL) return; // Should allow 'next' to be NULL if at start? 
+    } else {
+        // Explore logic
+        if (curr->connections.count > 0) {
+            int r = rand() % curr->connections.count;
+            next = curr->connections.data[r];
+            roomstack_push(&hunter->path, curr);
+        }
+    }
+
+    if (next != NULL) {
         room_remove_hunter(curr, hunter);
         room_add_hunter(next, hunter);
         hunter->curr_room = next;
-        
-        log_move(0, hunter->boredom, hunter->fear, curr->name, next->name, hunter->curr_device);
+        log_move(hunter->id, hunter->boredom, hunter->fear, curr->name, next->name, hunter->curr_device);
     }
 }
 
-/* New Function: hunter_take_turn 
-   Performs one "tick" of hunter logic.
-*/
-// Add 'bool hunter_take_turn(Hunter* h);' to defs.h
 bool hunter_take_turn(Hunter* hunter) {
-    if (hunter->exited) return false;
-
-    // 1. Update Stats (R-17)
+    if (hunter->exited){
+    	return false;
+    }
+    
     if (hunter->curr_room->ghost != NULL) {
         hunter->fear++;
         hunter->boredom = 0;
     } else {
         hunter->boredom++;
     }
-
-    // 2. Check Exits (R-19)
+	hunter_collect(hunter);
     if (hunter->fear >= HUNTER_FEAR_MAX) {
-        log_exit(0, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, LR_AFRAID);
+        log_exit(hunter->id, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, LR_AFRAID);
         hunter->reason = LR_AFRAID;
         hunter->exited = true;
         room_remove_hunter(hunter->curr_room, hunter);
         return false;
     }
     if (hunter->boredom >= ENTITY_BOREDOM_MAX) {
-        log_exit(0, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, LR_BORED);
+        log_exit(hunter->id, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, LR_BORED);
         hunter->reason = LR_BORED;
         hunter->exited = true;
         room_remove_hunter(hunter->curr_room, hunter);
         return false;
     }
 
-    // 3. Collect Evidence
-    hunter_collect(hunter);
-	if (hunter->exited){
-		hunter->reason = LR_EVIDENCE;
-		return false;
-	}
-    // 4. Move
+    if (strcmp(hunter->curr_room->name, STARTING_ROOM_NAME) == 0 && hunter->returning) {
+        log_return_to_van(hunter->id, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, false);
+        hunter->returning = false;
+        roomstack_cleanup(&hunter->path);
+        
+        if (count_evidence(hunter->casefile->collected) >= 3) {
+             log_exit(hunter->id, hunter->boredom, hunter->fear, hunter->curr_room->name, hunter->curr_device, LR_EVIDENCE);
+             hunter->reason = LR_EVIDENCE;
+             hunter->exited = true;
+             room_remove_hunter(hunter->curr_room, hunter);
+             return false;
+        }
+        
+        enum EvidenceType new_d = random_device();
+        while(new_d == hunter->curr_device) new_d = random_device();
+        log_swap(hunter->id, hunter->boredom, hunter->fear, hunter->curr_device, new_d);
+        hunter->curr_device = new_d;
+        hunter->boredom = 0;
+    }
     hunter_move(hunter);
-
     return true;
+}
+
+void hunter_print(Hunter* h) {
+	if (h == NULL){
+		printf("Hunter doesn't exist");
+	}
+    printf("Hunter %s\n", h->name);
+}
+
+void hunter_cleanup(Hunter* h) {
+    roomstack_cleanup(&h->path);
 }
