@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
 #include "defs.h"
 #include "helpers.h"
+
 
 enum GhostType random_ghost_type(){
 	enum GhostType types[] = {
@@ -15,6 +17,7 @@ enum GhostType random_ghost_type(){
     };
     int num_of_types = sizeof(types)/sizeof(types[0]);
     int rand_type = rand()%num_of_types;
+    printf("%d",rand_type);
     return types[rand_type];
 } 
 struct Room* random_room(House* house){
@@ -25,44 +28,63 @@ struct Room* random_room(House* house){
 	return &house->rooms[rand_room];
 }
 void ghost_init(Ghost* ghost, House* house){
-	if (ghost == NULL || house == NULL){
-		return;
-	}
-	ghost->id = DEFAULT_GHOST_ID;
-	ghost->type = random_ghost_type();
-	ghost->room = random_room(house);
-	if (ghost->room != NULL) {
-        // Tell the room the ghost is here
-        room_add_ghost(ghost->room, ghost);
-    
-        log_ghost_init(ghost->id, ghost->room->name, ghost->type); // Logs the ghost being initiated
+    if (ghost == NULL || house == NULL){
+        return;
     }
-	ghost->boredom = 0;
-	ghost->exited = false;
+    ghost->id = DEFAULT_GHOST_ID;
+    ghost->type = random_ghost_type();
+    
+    // Get a random room that's not the Van
+    do {
+        ghost->room = random_room(house);
+    } while (ghost->room != NULL && strcmp(ghost->room->name, STARTING_ROOM_NAME) == 0);
+    
+    if (ghost->room != NULL) {
+        room_add_ghost(ghost->room, ghost);
+        log_ghost_init(ghost->id, ghost->room->name, ghost->type);
+    }
+    ghost->boredom = 0;
+    ghost->exited = false;
 }
 
 void ghost_move(Ghost* ghost) {
     if (ghost->room == NULL) return;
     
     Room* curr = ghost->room;
-
-    if (curr->num_of_hunters > 0) { // Cannot move if hunters are in the room 
-        return; 
+    
+    // Don't lock yet - just read connection count
+    if (curr->connections.count == 0) return;
+    
+    // Pick a random room
+    int r = rand() % curr->connections.count;
+    Room* next = curr->connections.data[r];
+    
+    if (next == NULL) return;
+    if (strcmp(next->name, STARTING_ROOM_NAME) == 0) return;
+    
+    // lock both rooms in consistent order
+    lock_two(curr, next);
+    
+    // Check conditions AFTER acquiring both locks
+    if (curr->num_of_hunters > 0) {
+        unlock_two(curr, next);
+        return;
     }
-
-    if (curr->connections.count > 0) {
-        int r = rand() % curr->connections.count;
-        Room* next = curr->connections.data[r];
-
-        // Perform Move
-        room_remove_ghost(curr, ghost);
-        room_add_ghost(next, ghost);
-        ghost->room = next;
-        
-        log_ghost_move(ghost->id, ghost->boredom, curr->name, next->name);
+    
+    if (next->num_of_hunters > 0) {  // Can't move to room with hunters
+        unlock_two(curr, next);
+        return;
     }
+    
+    // Perform the move
+    room_remove_ghost(curr, ghost);
+    room_add_ghost(next, ghost);
+    ghost->room = next;
+    
+    unlock_two(curr, next);
+    
+    log_ghost_move(ghost->id, ghost->boredom, curr->name, next->name);
 }
-
 // Leaves evidence
 void ghost_haunt(Ghost* ghost) {
     if (ghost->room == NULL) return;
@@ -70,7 +92,7 @@ void ghost_haunt(Ghost* ghost) {
     EvidenceByte all_evidence = (EvidenceByte)ghost->type; 
     
     
-    // 2. Extract valid evidence bits into an array
+    // Extract valid evidence bits into an array
     EvidenceByte valid_bits[3]; // Max 3 bits per ghost
     int count = 0;
     
@@ -83,48 +105,85 @@ void ghost_haunt(Ghost* ghost) {
         }
     }
     
-    // 3. Pick one random piece from the valid options
+    // Pick one random piece from the valid options
     if (count > 0) {
         int r = rand() % count;
         EvidenceByte chosen_evidence = valid_bits[r];
         
-        // 4. Drop it (Add to room)
+        // Drop it (Add to room)
+        sem_wait(&ghost->room->mutex);
         ghost->room->evidence |= chosen_evidence;
-        
+        sem_post(&ghost->room->mutex);
         log_ghost_evidence(ghost->id, ghost->boredom, ghost->room->name, chosen_evidence);
     }
 }
 
-/* New Function: ghost_take_turn
-   Performs one "tick" of the ghost logic.
-   Returns true if the ghost is still active, false if it exited.
-*/
-// You should add 'bool ghost_take_turn(Ghost* ghost);' to defs.h
 bool ghost_take_turn(Ghost* ghost) {
-    if (ghost->exited) return false;
+    if (ghost == NULL || ghost->exited) return false;
 
-    if (ghost->room->num_of_hunters > 0) {
-        ghost->boredom = 0;
-    } else {
+    if (ghost->room == NULL) {
         ghost->boredom++;
+        if (ghost->boredom >= ENTITY_BOREDOM_MAX) {
+            ghost->exited = true;
+            log_ghost_exit(ghost->id, ghost->boredom, "Unknown");
+            return false;
+        }
+        return true;
     }
 
+    // Check boredom BEFORE action
     if (ghost->boredom >= ENTITY_BOREDOM_MAX) {
+        Room* r = ghost->room;
+        if (r != NULL) {
+            sem_wait(&r->mutex);
+            room_remove_ghost(r, ghost);
+            sem_post(&r->mutex);
+        }
         ghost->exited = true;
-        log_ghost_exit(ghost->id, ghost->boredom, ghost->room->name);
-        room_remove_ghost(ghost->room, ghost);
+        const char* room_name = "Unknown";
+        if (r != NULL) {
+            room_name = r->name;
+        }
+        log_ghost_exit(ghost->id, ghost->boredom, room_name);
         return false;
     }
 
+    // Take random action
     int action = rand() % 3; // 0 = Idle, 1 = Haunt, 2 = Move
-    
-    if (action == 0) {
-        log_ghost_idle(ghost->id, ghost->boredom, ghost->room->name);
-    } else if (action == 1) {
+
+    if (action == 1) {
         ghost_haunt(ghost);
-    } else {
+    }
+    else if (action == 2) {
         ghost_move(ghost);
+    }
+    else {
+        if (ghost->room != NULL) {
+            sem_wait(&ghost->room->mutex);
+            log_ghost_idle(ghost->id, ghost->boredom, ghost->room->name);
+            sem_post(&ghost->room->mutex);
+        }
+    }
+
+    // Check if hunters are present and update boredom accordingly
+    if (ghost->room != NULL) {
+        sem_wait(&ghost->room->mutex);
+        bool hunters_present = ghost->room->num_of_hunters > 0;
+        sem_post(&ghost->room->mutex);
+
+        if (hunters_present) {
+            ghost->boredom = 0;  // Reset if hunters present
+        } else {
+            ghost->boredom++;     // Increment if alone
+        }
     }
 
     return true;
+}
+void* ghost_thread(void* arg) {
+    Ghost* ghost = (Ghost*)arg;
+    while(ghost_take_turn(ghost)) {
+        usleep(10000); 
+    }
+    return NULL;
 }

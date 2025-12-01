@@ -5,19 +5,7 @@
 #include "helpers.h"
 
 int main() {
-
-    /*
-    1. Initialize a House structure.
-    2. Populate the House with rooms using the provided helper function.
-    3. Initialize all of the ghost data and hunters.
-    4. Create threads for the ghost and each hunter.
-    5. Wait for all threads to complete.
-    6. Print final results to the console:
-         - Type of ghost encountered.
-         - The reason that each hunter exited
-         - The evidence collected by each hunter and which ghost is represented by that evidence.
-    7. Clean up all dynamically allocated resources and call sem_destroy() on all semaphores.
-    */
+	srand(time(NULL));
     printf("--- Initializing House ---\n");
 	struct House house;
 	house_init(&house);
@@ -31,34 +19,30 @@ int main() {
     
     printf("\n--- Starting Simulation ---\n");
     
-    bool ghost_running = true;
-    bool hunters_remaining = true;
-
-    while (ghost_running && hunters_remaining) {
-        ghost_running = ghost_take_turn(&house.ghost);
-
-        int active = 0;
-        for (int i = 0; i < house.hunter_capacity; i++) {
-            if (hunter_take_turn(&house.hunters[i])) {
-                active++;
-            }
-        }
-        if (active == 0) hunters_remaining = false;
-    }
-
-    printf("\n--- FINAL RESULTS ---\n");
-    printf("Ghost: %s\n", ghost_to_string(house.ghost.type));
+   	pthread_t ghost_tid;
+   	pthread_t* hunter_tids = malloc(sizeof(pthread_t) * house.hunter_capacity);
     
+    // 1. Create Ghost Thread
+    pthread_create(&ghost_tid, NULL, ghost_thread, &house.ghost);
+
+    // 2. Create Hunter Threads
     for (int i = 0; i < house.hunter_capacity; i++) {
-        Hunter* h = &house.hunters[i];
-        printf("Hunter %s: %s\n", h->name, exit_reason_to_string(h->reason));
+        pthread_create(&hunter_tids[i], NULL, hunter_thread, &house.hunters[i]);
     }
 
+    // 3. Wait for Ghost
+    pthread_join(ghost_tid, NULL);
+    
+    // 4. Wait for Hunters
+    for (int i = 0; i < house.hunter_capacity; i++) {
+        pthread_join(hunter_tids[i], NULL);
+    }
+
+    // Free the thread ID array
+    free(hunter_tids);
     // Evidence
     EvidenceByte collected = house.casefile.collected;
     
-    // --- DEBUG PRINT: Show exactly what evidence was found ---
-    printf("\nCollected Evidence Byte: %02X (Hex)\n", collected); // Print raw hex
     printf("Evidence Items: ");
     
     // Get all possible evidence types from helper
@@ -77,12 +61,12 @@ int main() {
         printf("None");
     }
     printf("\n");
-    // ---------------------------------------------------------
-
+    
+	printf("Actual Ghost Type: %s\n", ghost_to_string(house.ghost.type));
     const enum GhostType* all_ghosts;
     int num_ghosts = get_all_ghost_types(&all_ghosts);
     bool hunters_won = false;
-
+	
     for (int i = 0; i < num_ghosts; i++) {
         if (collected == all_ghosts[i]) {
             printf("Evidence matches: %s\n", ghost_to_string(all_ghosts[i]));

@@ -5,13 +5,14 @@
 #include <semaphore.h>
 #include <pthread.h>
 
+
 #define MAX_ROOM_NAME 64
 #define MAX_HUNTER_NAME 64
-#define MAX_HUNTERS 4
-#define MAX_ROOMS 13
-#define MAX_CONNECTIONS 13
-#define ENTITY_BOREDOM_MAX 100
-#define HUNTER_FEAR_MAX 100
+#define MAX_ROOMS 24
+#define MAX_ROOM_OCCUPANCY 8
+#define MAX_CONNECTIONS 8
+#define ENTITY_BOREDOM_MAX 15
+#define HUNTER_FEAR_MAX 15
 #define DEFAULT_GHOST_ID 68057
 #define STARTING_ROOM_NAME "Van"
 
@@ -95,14 +96,14 @@ struct Room {
     char name[MAX_ROOM_NAME];
     struct RoomArray connections;
     Ghost* ghost;
-    Hunter* hunters[MAX_HUNTERS];
+    Hunter* hunters[MAX_ROOM_OCCUPANCY];
     int num_of_hunters;
     bool exit; 
     EvidenceByte evidence;
     sem_t mutex;
 };
 
-// Linked List Stack
+
 struct RoomNode {
     Room* room;
     struct RoomNode* next;
@@ -155,7 +156,7 @@ void room_remove_ghost(Room* room, Ghost* ghost);
 void room_cleanup(Room* room);
 void roomarray_add(RoomArray* arr, Room* room);
 
-// Room Stack (Updated to match what you actually need)
+// Room Stack 
 void roomstack_init(RoomStack* stack);
 void roomstack_push(RoomStack* stack, Room* room);
 Room* roomstack_pop(RoomStack* stack);
@@ -172,5 +173,9 @@ bool hunter_take_turn(Hunter* hunter);
 void hunter_cleanup(Hunter* hunter);
 void* hunter_thread(void* arg);
 void hunter_print(Hunter* hunter);
+
+// Threading
+void lock_two(Room* a, Room* b);
+void unlock_two(Room* a, Room* b);
 
 #endif

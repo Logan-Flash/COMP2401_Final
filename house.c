@@ -22,8 +22,7 @@ void house_init_hunters(House* house){
 
     printf("Enter hunters one at a time. Type 'done' as the name to finish.\n");
 
-    for (int i = 0; i < MAX_HUNTERS; i++) {
-        // MATCHING SCREENSHOT: Name Prompt
+    while (1) {
         printf("Enter hunter name (max 63 characters) or 'done' to finish: ");
         
         if (fgets(input_buffer, MAX_HUNTER_NAME, stdin) == NULL) {
@@ -55,14 +54,14 @@ void house_init_hunters(House* house){
         hunter_init(&house->hunters[count], hunter_id, hunter_name, house);
         
         if (house->starting_room != NULL) { // Puts the hunter in the starting room
-            room_add_hunter(house->starting_room, &house->hunters[i]);
+            room_add_hunter(house->starting_room, &house->hunters[count]);
         }
         count++;
     }
     // Update capacity to the actual number of hunters created
     house->hunter_capacity = count;
 }
-
+// Frees all memory in the house
 void house_cleanup(House* house) {
     if (house == NULL) return;
     if (house->hunters != NULL) {
@@ -71,7 +70,7 @@ void house_cleanup(House* house) {
         }
         free(house->hunters);
     }
-    sem_destroy(&house->casefile.mutex);
+    sem_destroy(&house->casefile.mutex); // Ensures semaphores also get taken care of
     for (int i = 0; i < house->room_count; i++) {
         room_cleanup(&house->rooms[i]);
     }
